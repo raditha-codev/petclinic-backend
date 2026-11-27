@@ -81,6 +81,7 @@ class OwnerTests {
 		owner.addPet(new Pet());
 
 		assertThat(owner.getPet("Leo")).isSameAs(leo);
+		assertThat(owner.getPet("Unknown")).isNull();
 	}
 
 	@Test
