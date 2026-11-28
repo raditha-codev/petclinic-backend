@@ -23,6 +23,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.test.context.aot.DisabledInAotMode;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -40,10 +41,14 @@ import static org.hamcrest.Matchers.hasProperty;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.not;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -246,6 +251,95 @@ class OwnerControllerTests {
 			.andExpect(status().is3xxRedirection())
 			.andExpect(redirectedUrl("/owners/" + pathOwnerId + "/edit"))
 			.andExpect(flash().attributeExists("error"));
+	}
+
+	@Test
+	void testProcessCreationFormSavesOwner() throws Exception {
+		mockMvc
+			.perform(post("/owners/new").param("firstName", "Joe")
+				.param("lastName", "Bloggs")
+				.param("address", "123 Caramel Street")
+				.param("city", "London")
+				.param("telephone", "1316761638"))
+			.andExpect(status().is3xxRedirection())
+			.andExpect(flash().attribute("message", "New Owner Created"));
+
+		verify(this.owners).save(any(Owner.class));
+	}
+
+	@Test
+	void testProcessCreationFormHasErrorsDoesNotSave() throws Exception {
+		mockMvc.perform(post("/owners/new").param("firstName", "Joe").param("lastName", "Bloggs"))
+			.andExpect(status().isOk())
+			.andExpect(view().name("owners/createOrUpdateOwnerForm"));
+
+		verify(this.owners, never()).save(any(Owner.class));
+	}
+
+	@Test
+	void testProcessFindFormWithoutLastNameSearchesAllOwners() throws Exception {
+		Page<Owner> tasks = new PageImpl<>(List.of(george()));
+		when(this.owners.findByLastNameStartingWith(eq(""), any(Pageable.class))).thenReturn(tasks);
+		mockMvc.perform(get("/owners"))
+			.andExpect(status().is3xxRedirection())
+			.andExpect(view().name("redirect:/owners/" + TEST_OWNER_ID));
+
+		verify(this.owners).findByLastNameStartingWith("", PageRequest.of(0, 5));
+	}
+
+	@Test
+	void testProcessFindFormMultipleOwnersAddsPaginationModel() throws Exception {
+		List<Owner> content = List.of(george(), new Owner());
+		Page<Owner> tasks = new PageImpl<>(content, PageRequest.of(1, 5), 7);
+		when(this.owners.findByLastNameStartingWith(eq("F"), any(Pageable.class))).thenReturn(tasks);
+		mockMvc.perform(get("/owners").param("page", "2").param("lastName", "F"))
+			.andExpect(status().isOk())
+			.andExpect(model().attribute("currentPage", 2))
+			.andExpect(model().attribute("totalPages", 2))
+			.andExpect(model().attribute("totalItems", 7L))
+			.andExpect(model().attribute("listOwners", content))
+			.andExpect(view().name("owners/ownersList"));
+
+		verify(this.owners).findByLastNameStartingWith("F", PageRequest.of(1, 5));
+	}
+
+	@Test
+	void testShowOwnerNotFound() {
+		assertThatThrownBy(() -> mockMvc.perform(get("/owners/{ownerId}", 99)))
+			.hasCauseInstanceOf(IllegalArgumentException.class)
+			.hasRootCauseMessage(
+					"Owner not found with id: 99. Please ensure the ID is correct and the owner exists in the database.");
+	}
+
+	@Test
+	void testInitUpdateOwnerFormOwnerNotFound() {
+		assertThatThrownBy(() -> mockMvc.perform(get("/owners/{ownerId}/edit", 99)))
+			.hasCauseInstanceOf(IllegalArgumentException.class);
+	}
+
+	@Test
+	void testProcessUpdateOwnerFormSavesOwnerWithPathId() throws Exception {
+		mockMvc
+			.perform(post("/owners/{ownerId}/edit", TEST_OWNER_ID).param("firstName", "Joe")
+				.param("lastName", "Bloggs")
+				.param("address", "123 Caramel Street")
+				.param("city", "London")
+				.param("telephone", "1616291589"))
+			.andExpect(status().is3xxRedirection())
+			.andExpect(flash().attribute("message", "Owner Values Updated"));
+
+		verify(this.owners)
+			.save(argThat(owner -> owner.getId() == TEST_OWNER_ID && "Bloggs".equals(owner.getLastName())));
+	}
+
+	@Test
+	void testProcessUpdateOwnerFormHasErrorsDoesNotSave() throws Exception {
+		mockMvc.perform(post("/owners/{ownerId}/edit", TEST_OWNER_ID).param("telephone", "123"))
+			.andExpect(status().isOk())
+			.andExpect(model().attributeHasFieldErrors("owner", "telephone"))
+			.andExpect(view().name("owners/createOrUpdateOwnerForm"));
+
+		verify(this.owners, never()).save(any(Owner.class));
 	}
 
 }

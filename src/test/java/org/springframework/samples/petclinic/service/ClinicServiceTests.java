@@ -17,6 +17,7 @@
 package org.springframework.samples.petclinic.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.LocalDate;
 import java.util.Collection;
@@ -28,7 +29,9 @@ import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase.Replace;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.orm.ObjectRetrievalFailureException;
 import org.springframework.samples.petclinic.owner.Owner;
 import org.springframework.samples.petclinic.owner.OwnerRepository;
 import org.springframework.samples.petclinic.owner.Pet;
@@ -246,6 +249,50 @@ class ClinicServiceTests {
 			.element(0)
 			.extracting(Visit::getDate)
 			.isNotNull();
+	}
+
+	@Test
+	void shouldFindAllOwnersWithEmptyLastNamePrefix() {
+		Page<Owner> owners = this.owners.findByLastNameStartingWith("", pageable);
+		assertThat(owners.getTotalElements()).isEqualTo(10);
+	}
+
+	@Test
+	void shouldFindNoOwnersForUnmatchedPrefix() {
+		Page<Owner> owners = this.owners.findByLastNameStartingWith("Zzz", pageable);
+		assertThat(owners).isEmpty();
+		assertThat(owners.getTotalElements()).isZero();
+	}
+
+	@Test
+	void shouldPageOwnersByLastName() {
+		Page<Owner> firstPage = this.owners.findByLastNameStartingWith("", PageRequest.of(0, 5));
+		assertThat(firstPage.getContent()).hasSize(5);
+		assertThat(firstPage.getTotalElements()).isEqualTo(10);
+		assertThat(firstPage.getTotalPages()).isEqualTo(2);
+		assertThat(firstPage.isFirst()).isTrue();
+		assertThat(firstPage.hasNext()).isTrue();
+	}
+
+	@Test
+	void shouldReturnEmptyPageBeyondLastPage() {
+		Page<Owner> page = this.owners.findByLastNameStartingWith("", PageRequest.of(5, 5));
+		assertThat(page.getContent()).isEmpty();
+		assertThat(page.getTotalElements()).isEqualTo(10);
+		assertThat(page.hasNext()).isFalse();
+	}
+
+	@Test
+	void shouldNotFindUnknownOwnerById() {
+		assertThat(this.owners.findById(999)).isEmpty();
+	}
+
+	@Test
+	void shouldThrowWhenEntityIdIsMissing() {
+		Collection<PetType> petTypes = this.types.findPetTypes();
+
+		assertThatThrownBy(() -> EntityUtils.getById(petTypes, PetType.class, 999))
+			.isInstanceOf(ObjectRetrievalFailureException.class);
 	}
 
 }
