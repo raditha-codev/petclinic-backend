@@ -92,6 +92,28 @@ class PetControllerTests {
 		given(this.owners.findById(TEST_OWNER_ID)).willReturn(Optional.of(owner));
 	}
 
+	private Owner buildOwner() {
+		Owner freshOwner = new Owner();
+		Pet pet = new Pet();
+		Pet dog = new Pet();
+		freshOwner.addPet(pet);
+		freshOwner.addPet(dog);
+		pet.setId(TEST_PET_ID);
+		dog.setId(TEST_PET_ID + 1);
+		pet.setName("petty");
+		dog.setName("doggy");
+		return freshOwner;
+	}
+
+	/**
+	 * With {@code spring.jpa.open-in-view=false}, every {@code findById} call in a
+	 * request returns a different Owner/Pet instance, so the lookups for the
+	 * {@code owner} and {@code pet} model attributes must not share objects.
+	 */
+	private void givenFreshOwnerOnEveryLookup() {
+		given(this.owners.findById(TEST_OWNER_ID)).willAnswer(invocation -> Optional.of(buildOwner()));
+	}
+
 	@Test
 	void testInitCreationForm() throws Exception {
 		mockMvc.perform(get("/owners/{ownerId}/pets/new", TEST_OWNER_ID))
@@ -267,6 +289,8 @@ class PetControllerTests {
 
 	@Test
 	void testProcessUpdateFormUpdatesExistingPet() throws Exception {
+		givenFreshOwnerOnEveryLookup();
+
 		mockMvc
 			.perform(post("/owners/{ownerId}/pets/{petId}/edit", TEST_OWNER_ID, TEST_PET_ID).param("name", "Betty")
 				.param("type", "hamster")
@@ -274,16 +298,21 @@ class PetControllerTests {
 			.andExpect(status().is3xxRedirection())
 			.andExpect(flash().attribute("message", "Pet details has been edited"));
 
-		verify(this.owners).save(owner);
-		Pet updated = owner.getPet(TEST_PET_ID);
+		ArgumentCaptor<Owner> savedOwner = ArgumentCaptor.forClass(Owner.class);
+		verify(this.owners).save(savedOwner.capture());
+		Owner saved = savedOwner.getValue();
+		Pet updated = saved.getPet(TEST_PET_ID);
 		assertThat(updated.getName()).isEqualTo("Betty");
 		assertThat(updated.getType().getName()).isEqualTo("hamster");
 		assertThat(updated.getBirthDate()).hasToString("2015-02-12");
-		assertThat(owner.getPets()).hasSize(2);
+		assertThat(saved.getPets()).hasSize(2);
+		assertThat(saved.getPet(TEST_PET_ID + 1).getName()).isEqualTo("doggy");
 	}
 
 	@Test
 	void testProcessUpdateFormKeepingSameNameSucceeds() throws Exception {
+		givenFreshOwnerOnEveryLookup();
+
 		mockMvc
 			.perform(post("/owners/{ownerId}/pets/{petId}/edit", TEST_OWNER_ID, TEST_PET_ID).param("name", "petty")
 				.param("type", "hamster")
@@ -293,7 +322,24 @@ class PetControllerTests {
 	}
 
 	@Test
+	void testProcessUpdateFormRenamingToNameOfLaterPetIsRejected() throws Exception {
+		givenFreshOwnerOnEveryLookup();
+
+		mockMvc
+			.perform(post("/owners/{ownerId}/pets/{petId}/edit", TEST_OWNER_ID, TEST_PET_ID).param("name", "doggy")
+				.param("type", "hamster")
+				.param("birthDate", "2015-02-12"))
+			.andExpect(status().isOk())
+			.andExpect(model().attributeHasFieldErrorCode("pet", "name", "duplicate"))
+			.andExpect(view().name("pets/createOrUpdatePetForm"));
+
+		verify(this.owners, never()).save(any(Owner.class));
+	}
+
+	@Test
 	void testProcessUpdateFormWithDuplicateName() throws Exception {
+		givenFreshOwnerOnEveryLookup();
+
 		mockMvc
 			.perform(post("/owners/{ownerId}/pets/{petId}/edit", TEST_OWNER_ID, TEST_PET_ID + 1).param("name", "petty")
 				.param("type", "hamster")
@@ -307,10 +353,12 @@ class PetControllerTests {
 
 	@Test
 	void testProcessUpdateFormWithFutureBirthDate() throws Exception {
+		givenFreshOwnerOnEveryLookup();
+
 		mockMvc
 			.perform(post("/owners/{ownerId}/pets/{petId}/edit", TEST_OWNER_ID, TEST_PET_ID).param("name", "petty")
 				.param("type", "hamster")
-				.param("birthDate", LocalDate.now().plusDays(1).toString()))
+				.param("birthDate", LocalDate.now().plusDays(2).toString()))
 			.andExpect(status().isOk())
 			.andExpect(model().attributeHasFieldErrorCode("pet", "birthDate", "typeMismatch.birthDate"))
 			.andExpect(view().name("pets/createOrUpdatePetForm"));

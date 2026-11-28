@@ -60,9 +60,11 @@ class PetTests {
 
 	@Test
 	void shouldDefaultVisitDateToToday() {
+		LocalDate before = LocalDate.now();
 		Visit visit = new Visit();
+		LocalDate after = LocalDate.now();
 
-		assertThat(visit.getDate()).isEqualTo(LocalDate.now());
+		assertThat(visit.getDate()).isBetween(before, after);
 	}
 
 	@Test
